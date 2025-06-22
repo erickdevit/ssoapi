@@ -1,0 +1,25 @@
+# Ignorar dependências locais, pois serão instaladas dentro do container
+node_modules
+
+# Ignorar logs do npm e yarn
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Ignorar arquivos de ambiente locais (devem ser injetados no container em tempo de execução)
+.env
+.env.*
+!/.env.example # A menos que você tenha um .env.example que QUEIRA incluir
+
+# Ignorar diretórios e arquivos do Git
+.git
+.gitignore
+
+# Ignorar arquivos específicos do Docker que não precisam estar na imagem
+Dockerfile
+.dockerignore
+docker-compose.yml # Se você criar um
+
+# Ignorar arquivos de sistema operacional
+.DS_Store
+Thumbs.db

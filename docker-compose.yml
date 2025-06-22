@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  ssotica-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ssotica-api:latest
+    container_name: ssotica-api-container
+    ports:
+      - "${PORT:-3000}:3000" # Mapeia a porta do host (definida por PORT ou 3000) para a porta 3000 do container
+    env_file:
+      - .env # Carrega variáveis de ambiente do arquivo .env na raiz do projeto
+    environment:
+      # Você pode sobrescrever ou adicionar variáveis de ambiente aqui se necessário
+      # Exemplo: NODE_ENV=production
+      # As variáveis SSOTICA_USER e SSOTICA_PASS devem estar no seu arquivo .env
+      - PORT=${PORT:-3000} # Garante que a aplicação dentro do container use a porta correta
+    # Se você precisar de volumes para desenvolvimento (ex: hot reload), pode adicioná-los aqui.
+    # Para produção, geralmente não é necessário montar o código fonte.
+    # volumes:
+    #   - .:/usr/src/app
+    #   - /usr/src/app/node_modules # Para não sobrescrever o node_modules do container com o local
+    restart: unless-stopped # Reinicia o container a menos que seja parado manualmente
+
+# Notas:
+# 1. Crie um arquivo .env na raiz do seu projeto com as seguintes variáveis:
+#    SSOTICA_USER=seu_usuario_ssotica
+#    SSOTICA_PASS=sua_senha_ssotica
+#    PORT=3000 (opcional, define a porta no host e no container)
+#
+# 2. Para construir e iniciar o serviço:
+#    docker-compose up --build
+#
+# 3. Para iniciar o serviço (se já construído):
+#    docker-compose up
+#
+# 4. Para parar o serviço:
+#    docker-compose down
+#
+# 5. A API estará acessível em http://localhost:PORT (onde PORT é o valor definido no .env ou 3000 por padrão)
+#    Exemplo: http://localhost:3000/consultar-parcelas?nome=SEU_CLIENTE
+#
+# 6. Certifique-se de que o arquivo .env NÃO seja versionado no Git. Adicione-o ao .gitignore.
+#    O .dockerignore já está configurado para não copiar o .env para a imagem Docker.
+#    As variáveis do .env são injetadas no container em tempo de execução pelo Docker Compose.

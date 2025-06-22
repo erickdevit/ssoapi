@@ -41,6 +41,79 @@ Substitua `seu_usuario_ssotica` e `sua_senha_ssotica` pelas suas credenciais rea
 
     O servidor será iniciado na porta especificada na variável `PORT` (padrão 3000). Você verá uma mensagem no console indicando que a API está rodando.
 
+## Como Executar com Docker
+
+Com o Docker e Docker Compose instalados, você pode facilmente construir e executar a API em um ambiente containerizado.
+
+1.  **Crie o arquivo `.env`:**
+    Assim como na execução local, crie um arquivo `.env` na raiz do projeto com suas credenciais SSÓtica e, opcionalmente, a porta:
+    ```ini
+    SSOTICA_USER=seu_usuario_ssotica
+    SSOTICA_PASS=sua_senha_ssotica
+    PORT=3000 # Opcional, padrão 3000. Esta porta será usada pelo host.
+    ```
+    **Importante:** Certifique-se de que o arquivo `.env` esteja no seu `.gitignore` para não ser enviado ao seu repositório Git. O `.dockerignore` já está configurado para não incluir o `.env` na imagem Docker; as variáveis são injetadas em tempo de execução.
+
+2.  **Construa e inicie o container com Docker Compose:**
+    No terminal, na raiz do projeto (onde o `docker-compose.yml` está localizado), execute:
+    ```bash
+    docker-compose up --build
+    ```
+    Este comando irá construir a imagem Docker (se ainda não foi construída ou se houve alterações) e iniciar o container. Para execuções futuras, você pode usar apenas `docker-compose up`.
+
+3.  **Acessando a API:**
+    A API estará acessível em `http://localhost:<PORTA>`, onde `<PORTA>` é o valor que você definiu para `PORT` no arquivo `.env` (ou 3000 se não definido).
+    Por exemplo: `http://localhost:3000/consultar-parcelas?nome=Nome%20Do%20Cliente`
+
+4.  **Parando o container:**
+    Para parar o container, pressione `CTRL+C` no terminal onde o `docker-compose up` está rodando, ou execute em outro terminal:
+    ```bash
+    docker-compose down
+    ```
+
+**Alternativa: Executando com comandos Docker (sem Docker Compose)**
+
+Se preferir não usar Docker Compose:
+
+1.  **Construa a imagem Docker:**
+    No terminal, na raiz do projeto (onde o `Dockerfile` está localizado), execute:
+    ```bash
+    docker build -t ssotica-api .
+    ```
+
+2.  **Execute o container Docker:**
+    Você precisará passar as variáveis de ambiente diretamente. Substitua `seu_usuario`, `sua_senha` e `sua_porta` pelos valores corretos:
+    ```bash
+    docker run -d -p <SUA_PORTA_NO_HOST>:3000 \
+      -e SSOTICA_USER="seu_usuario_ssotica" \
+      -e SSOTICA_PASS="sua_senha_ssotica" \
+      -e PORT=3000 \
+      --name ssotica-api-container \
+      ssotica-api
+    ```
+    *   `-d`: Executa o container em modo detached (em segundo plano).
+    *   `-p <SUA_PORTA_NO_HOST>:3000`: Mapeia a porta `<SUA_PORTA_NO_HOST>` do seu computador para a porta 3000 dentro do container (onde a aplicação está escutando, conforme definido pela variável `PORT` interna ou o `EXPOSE` no Dockerfile).
+    *   `-e VARIAVEL="valor"`: Define as variáveis de ambiente.
+    *   `--name ssotica-api-container`: Dá um nome ao container para facilitar o gerenciamento.
+    *   `ssotica-api`: Nome da imagem que você construiu.
+
+    A API estará acessível em `http://localhost:<SUA_PORTA_NO_HOST>`.
+
+3.  **Para ver os logs do container:**
+    ```bash
+    docker logs ssotica-api-container
+    ```
+
+4.  **Para parar o container:**
+    ```bash
+    docker stop ssotica-api-container
+    ```
+
+5.  **Para remover o container:**
+    ```bash
+    docker rm ssotica-api-container
+    ```
+
 ## Endpoints da API
 
 ### `GET /consultar-parcelas`
