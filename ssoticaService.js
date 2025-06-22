@@ -214,10 +214,9 @@ class SsoticaScraper {
         searchTermSelect_Parcelamento: 'nome_apelido', // Tipo de busca: por nome/apelido
         searchTerm_Parcelamento: nomeBusca, // Termo da busca (nome do cliente)
         'situacao_Parcelamento[]': DEFAULT_SITUACAO_PARCELA, // Filtro por situação da parcela (Abertas/Pendentes)
-        tipoPeriodo_Parcelamento: 'L', // Adicionado para exibir todas as parcelas
-        'periodo_Parcelamento[inicio]': '21/06/2025', // Data de início do período (exemplo)
-        'periodo_Parcelamento[fim]': '21/06/2025', // Data de fim do período (exemplo)
-      });
+        tipoPeriodo_Parcelamento: '', // Adicionado para exibir todas as parcelas
+
+         });
 
       console.log('Payload da busca:', Object.fromEntries(searchPayload)); // Log para verificar o payload
       console.log('Enviando requisição de busca de parcelas...');
