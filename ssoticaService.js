@@ -81,11 +81,15 @@ class SsoticaScraper {
       console.log('Token CSRF obtido com sucesso.');
 
       // 2. Preparar dados do formulário de login
+      // Ajustado para usar 'email' como chave, baseado no erro 422 e confirmação do usuário
       const loginFormParams = new URLSearchParams({
         _token: this.csrfToken,
-        login: this.user,
+        email: this.user, // this.user contém o e-mail fornecido no .env
         password: this.pass,
       });
+      
+      // Log para confirmar a alteração (pode ser removido após sucesso)
+      console.log('Enviando formulário de login com os seguintes dados (campo "email"):', Object.fromEntries(loginFormParams));
 
       // 3. Enviar a requisição de login (POST)
       const loginPostResponse = await this.client.post(SSOTICA_LOGIN_URL, loginFormParams, {
@@ -95,19 +99,40 @@ class SsoticaScraper {
       // Validação simples do sucesso do login (pode ser melhorada)
       // Ex: verificar se foi redirecionado para o dashboard ou se o corpo da resposta indica sucesso.
       // Por enquanto, consideramos sucesso se não houver erro e o status for 2xx.
+      // E crucialmente, se a URL final não for a de login (indicando redirecionamento por falha)
+      // Ou se o corpo da resposta não contiver mensagens de erro comuns.
+      const responseURL = loginPostResponse.request.res.responseUrl;
+      const responseBody = loginPostResponse.data;
+
+      // Log para depuração
+      // console.log('Login POST Response URL:', responseURL);
+      // console.log('Login POST Response Body (primeiros 500 chars):', responseBody.substring(0, 500));
+
+
       if (loginPostResponse.status >= 200 && loginPostResponse.status < 300) {
+        // Verifica se fomos redirecionados de volta para a página de login ou se há mensagens de erro.
+        // Essas são heurísticas e podem precisar de ajuste se o SSÓtica mudar suas respostas de erro.
+        const isLoginFailedPage = responseURL.includes('/login');
+        const hasErrorMessage = /usu.rio ou senha inv.lidos/i.test(responseBody) || /login inv.lido/i.test(responseBody);
+
+        if (isLoginFailedPage || hasErrorMessage) {
+          console.warn('Login no SSÓtica falhou: Usuário ou senha inválidos, ou outra condição de falha na página de login.');
+          // Log do corpo da resposta pode ser útil aqui em produção, mas com cuidado para não vazar dados sensíveis.
+          // console.error('Corpo da resposta da falha de login:', responseBody);
+          throw new SsoticaServiceError('Usuário ou senha inválidos.', 'LoginError.InvalidCredentials');
+        }
+
         this.isLoggedIn = true;
         console.log('Login no SSÓtica realizado com sucesso.');
+
       } else {
-        // Se o login falhar silenciosamente (status 200 mas com msg de erro na página),
-        // o scraping subsequente provavelmente falhará.
-        console.warn(`Login pode ter falhado silenciosamente. Status: ${loginPostResponse.status}`);
-        // Poderia adicionar uma verificação no HTML de resposta aqui para confirmar o login.
-        this.isLoggedIn = true; // Assumindo sucesso por enquanto para não bloquear o fluxo original
+        // Se o status HTTP em si já indica um erro.
+        console.warn(`Falha no POST de login. Status: ${loginPostResponse.status}`);
+        throw new SsoticaServiceError(`Falha na requisição de login. Status: ${loginPostResponse.status}`, 'LoginError.RequestFailed');
       }
 
     } catch (error) {
-      console.error('Falha detalhada no login SSÓtica:', error);
+      console.error('Falha detalhada no login SSÓtica:', error.message); // Log apenas da mensagem para não poluir com stacktrace completo sempre
       if (error instanceof SsoticaServiceError) throw error;
       throw new SsoticaServiceError(`Falha no login SSÓtica: ${error.message}`, 'LoginError.RequestFailed');
     }

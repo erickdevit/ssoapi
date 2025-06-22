@@ -62,10 +62,11 @@ app.get('/consultar-parcelas', async (req, res) => {
         case 'ConfigurationError':
         case 'LoginError.CSRFTokenMissing':
         case 'LoginError.RequestFailed':
-          return res.status(503).json({ // Service Unavailable
+        case 'LoginError.InvalidCredentials': // Novo tipo de erro adicionado
+          return res.status(503).json({ // Service Unavailable - ou 401 Unauthorized para InvalidCredentials
             success: false,
-            error: 'Serviço temporariamente indisponível devido a problemas de configuração ou login no sistema externo.',
-            code: 'SERVICE_UNAVAILABLE_SSOTICA_AUTH_FAILURE',
+            error: error.type === 'LoginError.InvalidCredentials' ? 'Falha na autenticação: Usuário ou senha inválidos.' : 'Serviço temporariamente indisponível devido a problemas de login no sistema externo.',
+            code: error.type === 'LoginError.InvalidCredentials' ? 'UNAUTHORIZED_SSOTICA_CREDENTIALS' : 'SERVICE_UNAVAILABLE_SSOTICA_AUTH_FAILURE',
             details: error.message
           });
         case 'InvalidInputError':
