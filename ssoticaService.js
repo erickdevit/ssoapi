@@ -187,17 +187,23 @@ class SsoticaScraper {
   }
 
   /**
-   * Busca parcelas no sistema SSÓtica com base no nome do cliente.
+   * Busca parcelas no sistema SSÓtica com base no nome do cliente e, opcionalmente, por situações específicas.
    * @param {string} nomeBusca - Nome (ou parte do nome) do cliente a ser buscado.
+   * @param {string[]} [situacoes=[DEFAULT_SITUACAO_PARCELA]] - Array de códigos de situação da parcela (ex: ['AP', 'PG']).
+   *                                                            Se um array vazio `[]` for passado, busca todas as situações.
+   *                                                            Padrão é `['AP']` (Abertas/Pendentes).
    * @returns {Promise<Array<object>>} Uma promessa que resolve para um array de objetos de parcela.
    */
-  async buscarParcelas(nomeBusca) {
+  async buscarParcelas(nomeBusca, situacoes = [DEFAULT_SITUACAO_PARCELA]) {
     if (!nomeBusca || typeof nomeBusca !== 'string' || nomeBusca.trim() === '') {
       throw new SsoticaServiceError('O nome para busca é obrigatório.', 'InvalidInputError');
     }
+    if (!Array.isArray(situacoes)) {
+      throw new SsoticaServiceError('O parâmetro "situacoes" deve ser um array.', 'InvalidInputError');
+    }
     const nomeBuscaNormalizado = nomeBusca.trim().toLowerCase();
 
-    console.log(`Iniciando busca de parcelas para: "${nomeBusca}"`);
+    console.log(`Iniciando busca de parcelas para: "${nomeBusca}", Situações: ${situacoes.length > 0 ? situacoes.join(', ') : 'Todas'}`);
     try {
       await this.login(); // Garante que o login foi feito
 
@@ -213,12 +219,19 @@ class SsoticaScraper {
         codigoDeBarras_Parcelamento: '', // Campo "Código de Barras" (não utilizado)
         searchTermSelect_Parcelamento: 'nome_apelido', // Tipo de busca: por nome/apelido
         searchTerm_Parcelamento: nomeBusca, // Termo da busca (nome do cliente)
-        'situacao_Parcelamento[]': DEFAULT_SITUACAO_PARCELA, // Filtro por situação da parcela (Abertas/Pendentes)
-        tipoPeriodo_Parcelamento: '', // Adicionado para exibir todas as parcelas
+        tipoPeriodo_Parcelamento: '', // Definido como '' para "Nenhum" período (buscar todas as datas)
+        // Os campos 'periodo_Parcelamento[inicio]' e '[fim]' são omitidos quando tipoPeriodo_Parcelamento é ''
+      });
 
-         });
+      // Adicionar situações ao payload
+      if (situacoes.length > 0) {
+        situacoes.forEach(sit => {
+          searchPayload.append('situacao_Parcelamento[]', sit);
+        });
+      }
+      // Se situacoes.length === 0, nenhum filtro de situação é adicionado, buscando todas as situações.
 
-      console.log('Payload da busca:', Object.fromEntries(searchPayload)); // Log para verificar o payload
+      console.log('Payload da busca:', Object.fromEntries(searchPayload.entries())); // Log para verificar o payload (usar .entries() para URLSearchParams)
       console.log('Enviando requisição de busca de parcelas...');
       const response = await this.client.post(SSOTICA_CONSULTA_URL, searchPayload, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
