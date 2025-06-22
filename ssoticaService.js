@@ -188,11 +188,24 @@ class SsoticaScraper {
 
   /**
    * Busca parcelas no sistema SSÓtica com base no nome do cliente e, opcionalmente, por situações específicas.
+   * O filtro de período é sempre definido para "Nenhum", buscando em todas as datas.
+   *
    * @param {string} nomeBusca - Nome (ou parte do nome) do cliente a ser buscado.
-   * @param {string[]} [situacoes=[DEFAULT_SITUACAO_PARCELA]] - Array de códigos de situação da parcela (ex: ['AP', 'PG']).
-   *                                                            Se um array vazio `[]` for passado, busca todas as situações.
-   *                                                            Padrão é `['AP']` (Abertas/Pendentes).
-   * @returns {Promise<Array<object>>} Uma promessa que resolve para um array de objetos de parcela.
+   * @param {string[]} [situacoes=[DEFAULT_SITUACAO_PARCELA]] - Array de códigos de situação da parcela a serem buscadas.
+   *                                                            Exemplos de códigos: 'AP' (Em aberto), 'PG' (Pago), 'AT' (Em atraso),
+   *                                                            'CA' (Cancelado), 'RE' (Renegociado).
+   *                                                            Se um array vazio `[]` for fornecido, a busca incluirá todas as situações.
+   *                                                            O valor padrão é `['AP']`, buscando apenas parcelas "Em aberto".
+   * @returns {Promise<Array<object>>} Uma promessa que resolve para um array de objetos de parcela, cada um contendo:
+   *                                     - nome: Nome do cliente.
+   *                                     - valor: Valor da parcela.
+   *                                     - parcela: Descrição da parcela (ex: "Parcela 1 de 3").
+   *                                     - numeroParcela: Número da parcela (ex: 1).
+   *                                     - totalParcelas: Total de parcelas do carne/acordo (ex: 3).
+   *                                     - vencimento: Data de vencimento da parcela (DD/MM/YYYY).
+   *                                     Retorna um array vazio se nenhuma parcela for encontrada.
+   * @throws {SsoticaServiceError} Se o nome de busca não for fornecido, se `situacoes` não for um array,
+   *                               ou em caso de falha na comunicação ou login com o sistema SSÓtica.
    */
   async buscarParcelas(nomeBusca, situacoes = [DEFAULT_SITUACAO_PARCELA]) {
     if (!nomeBusca || typeof nomeBusca !== 'string' || nomeBusca.trim() === '') {
