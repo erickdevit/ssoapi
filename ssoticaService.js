@@ -3,116 +3,239 @@ const cheerio = require('cheerio');
 const { wrapper } = require('axios-cookiejar-support');
 const { CookieJar } = require('tough-cookie');
 
-const SSOTICA_LOGIN_URL = 'https://app.ssotica.com.br/login';
-const SSOTICA_CONSULTA_URL = 'https://app.ssotica.com.br/financeiro/contas-a-receber/LwlRRM/listar';
+// URLs base do sistema SSÓtica
+const SSOTICA_BASE_URL = 'https://app.ssotica.com.br';
+const SSOTICA_LOGIN_URL = `${SSOTICA_BASE_URL}/login`;
+const SSOTICA_CONSULTA_URL = `${SSOTICA_BASE_URL}/financeiro/contas-a-receber/LwlRRM/listar`; // LwlRRM parece ser um ID de empresa
 
+// Seletores CSS para extração de dados da página HTML
 const SELECTORS = {
-  csrfToken: 'input[name="_token"]',
-  rows: '.row',
-  nome: '.cliente-nome a',
-  valor: '.valor-conta-a-receber',
-  parcelaInfo: '.info-parcela',
-  vencimentoIconParent: '.fa-clock-o',
+  csrfToken: 'input[name="_token"]', // Token CSRF para segurança
+  rows: '.row', // Linha que contém informações de uma parcela
+  nomeCliente: '.cliente-nome a', // Nome do cliente
+  valorParcela: '.valor-conta-a-receber', // Valor da parcela
+  infoParcela: '.info-parcela', // Texto contendo "Parcela X de Y"
+  iconeVencimento: '.fa-clock-o', // Ícone próximo à data de vencimento
 };
 
+// Constantes para configuração da busca
+const DEFAULT_ORDER_BY = 'VENCIMENTO';
+const DEFAULT_ORDER_DIRECTION = 'asc';
+const DEFAULT_SITUACAO_PARCELA = 'AP'; // "AP" = Aberta/Pendente
+const DEFAULT_EMPRESA_ID = 'LwlRRM'; // ID da empresa padrão para consulta
+
+// Limites para filtro de número de parcelas (requisito específico)
+const MIN_NUMERO_PARCELA = 1;
+const MAX_NUMERO_PARCELA = 6;
+
+class SsoticaServiceError extends Error {
+  constructor(message, type = 'GenericServiceError') {
+    super(message);
+    this.name = this.constructor.name;
+    this.type = type;
+  }
+}
+
 class SsoticaScraper {
-  constructor(user, pass) {
+  constructor(user, pass, requestTimeout = 20000) {
+    if (!user || !pass) {
+      throw new SsoticaServiceError('Usuário e senha do SSÓtica são obrigatórios.', 'ConfigurationError');
+    }
     this.user = user;
     this.pass = pass;
-    this.jar = new CookieJar();
-    this.client = wrapper(axios.create({
+    this.jar = new CookieJar(); // Jarra de cookies para manter a sessão
+    this.client = wrapper(axios.create({ // Cliente Axios configurado
       jar: this.jar,
-      withCredentials: true,
-      timeout: 20000,
+      withCredentials: true, // Permite o envio de cookies
+      timeout: requestTimeout, // Timeout para as requisições
+      headers: {
+        // Simula um navegador comum para evitar bloqueios simples
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36',
+      }
     }));
-    this.csrfToken = null;
-    this.isLoggedIn = false;
+    this.csrfToken = null; // Token CSRF, obtido após o primeiro acesso
+    this.isLoggedIn = false; // Flag para controlar o estado do login
   }
 
+  /**
+   * Realiza o login no sistema SSÓtica.
+   * Obtém o token CSRF da página de login e o utiliza para autenticar.
+   */
   async login() {
-    if (this.isLoggedIn) return;
+    if (this.isLoggedIn) {
+      console.log('Login já realizado, pulando etapa.');
+      return;
+    }
 
+    console.log('Iniciando processo de login no SSÓtica...');
     try {
-      const loginPage = await this.client.get(SSOTICA_LOGIN_URL);
-      const $ = cheerio.load(loginPage.data);
+      // 1. Obter a página de login para extrair o token CSRF
+      const loginPageResponse = await this.client.get(SSOTICA_LOGIN_URL);
+      const $ = cheerio.load(loginPageResponse.data);
       this.csrfToken = $(SELECTORS.csrfToken).val();
 
       if (!this.csrfToken) {
-        throw new Error('Token CSRF não encontrado na página de login.');
+        console.error('Token CSRF não encontrado na página de login.');
+        throw new SsoticaServiceError('Token CSRF não encontrado. A estrutura da página de login pode ter mudado.', 'LoginError.CSRFTokenMissing');
       }
+      console.log('Token CSRF obtido com sucesso.');
 
-      const form = new URLSearchParams({
+      // 2. Preparar dados do formulário de login
+      const loginFormParams = new URLSearchParams({
         _token: this.csrfToken,
         login: this.user,
         password: this.pass,
       });
 
-      await this.client.post(SSOTICA_LOGIN_URL, form, {
+      // 3. Enviar a requisição de login (POST)
+      const loginPostResponse = await this.client.post(SSOTICA_LOGIN_URL, loginFormParams, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
-      this.isLoggedIn = true;
+      // Validação simples do sucesso do login (pode ser melhorada)
+      // Ex: verificar se foi redirecionado para o dashboard ou se o corpo da resposta indica sucesso.
+      // Por enquanto, consideramos sucesso se não houver erro e o status for 2xx.
+      if (loginPostResponse.status >= 200 && loginPostResponse.status < 300) {
+        this.isLoggedIn = true;
+        console.log('Login no SSÓtica realizado com sucesso.');
+      } else {
+        // Se o login falhar silenciosamente (status 200 mas com msg de erro na página),
+        // o scraping subsequente provavelmente falhará.
+        console.warn(`Login pode ter falhado silenciosamente. Status: ${loginPostResponse.status}`);
+        // Poderia adicionar uma verificação no HTML de resposta aqui para confirmar o login.
+        this.isLoggedIn = true; // Assumindo sucesso por enquanto para não bloquear o fluxo original
+      }
+
     } catch (error) {
-      throw new Error(`Falha no login SSÓtica: ${error.message}`);
+      console.error('Falha detalhada no login SSÓtica:', error);
+      if (error instanceof SsoticaServiceError) throw error;
+      throw new SsoticaServiceError(`Falha no login SSÓtica: ${error.message}`, 'LoginError.RequestFailed');
     }
   }
 
-  async buscarParcelas(nomeBusca) {
-    try {
-      await this.login();
+  /**
+   * Extrai os dados de uma única linha de parcela do HTML.
+   * @param {cheerio.CheerioAPI} $ - Instância do Cheerio para o contexto da linha.
+   * @param {cheerio.Element} rowElement - O elemento da linha.
+   * @returns {object|null} Objeto com dados da parcela ou null se dados essenciais não forem encontrados.
+   */
+  _parseParcelaRow($, rowElement) {
+    const el = $(rowElement);
 
-      const payload = new URLSearchParams({
+    const nomeCliente = el.find(SELECTORS.nomeCliente).text().trim();
+    const valorParcela = el.find(SELECTORS.valorParcela).text().trim();
+    const infoParcelaTexto = el.find(SELECTORS.infoParcela).text().trim();
+
+    // Extrai "X" e "Y" de "Parcela X de Y"
+    const parcelaMatch = infoParcelaTexto.match(/Parcela\s*(\d+)\s*de\s*(\d+)/i);
+    const numeroParcela = parcelaMatch ? parseInt(parcelaMatch[1], 10) : null;
+    const totalParcelas = parcelaMatch ? parseInt(parcelaMatch[2], 10) : null;
+    const parcelaFormatada = parcelaMatch ? `Parcela ${numeroParcela} de ${totalParcelas}` : infoParcelaTexto; // Fallback para texto original
+
+    // A data de vencimento está no texto do elemento pai do ícone de relógio.
+    // Ex: <span class="text-danger"> <i class="fa fa-clock-o"></i> 01/01/2024 </span>
+    // Precisamos pegar o texto do span, não apenas do ícone.
+    const vencimentoTextoCompleto = el.find(SELECTORS.iconeVencimento).parent().text().trim();
+    const vencimento = vencimentoTextoCompleto.replace(/[\s\S]*?(\d{2}\/\d{2}\/\d{4})[\s\S]*/, '$1').trim(); // Extrai apenas a data DD/MM/YYYY
+
+    if (!nomeCliente || !valorParcela) {
+      // Considerar inválido se não houver nome ou valor.
+      console.warn('Linha de parcela ignorada por falta de nome ou valor:', el.html());
+      return null;
+    }
+
+    return {
+      nome: nomeCliente,
+      valor: valorParcela,
+      parcela: parcelaFormatada,
+      numeroParcela,
+      totalParcelas,
+      vencimento,
+    };
+  }
+
+  /**
+   * Busca parcelas no sistema SSÓtica com base no nome do cliente.
+   * @param {string} nomeBusca - Nome (ou parte do nome) do cliente a ser buscado.
+   * @returns {Promise<Array<object>>} Uma promessa que resolve para um array de objetos de parcela.
+   */
+  async buscarParcelas(nomeBusca) {
+    if (!nomeBusca || typeof nomeBusca !== 'string' || nomeBusca.trim() === '') {
+      throw new SsoticaServiceError('O nome para busca é obrigatório.', 'InvalidInputError');
+    }
+    const nomeBuscaNormalizado = nomeBusca.trim().toLowerCase();
+
+    console.log(`Iniciando busca de parcelas para: "${nomeBusca}"`);
+    try {
+      await this.login(); // Garante que o login foi feito
+
+      // Payload para a requisição POST de busca de parcelas.
+      // Simula os filtros aplicados na interface web do SSÓtica.
+      const searchPayload = new URLSearchParams({
         _token: this.csrfToken,
-        clearFilter: '0',
-        orderBy_Parcelamento: 'VENCIMENTO',
-        ascDesc_Parcelamento: 'asc',
-        empresa_Parcelamento: 'LwlRRM',
-        nossoNumero_Parcelamento: '',
-        codigoDeBarras_Parcelamento: '',
-        searchTermSelect_Parcelamento: 'nome_apelido',
-        searchTerm_Parcelamento: nomeBusca,
-        'situacao_Parcelamento[]': 'AP',
+        clearFilter: '0', // Indica para não limpar filtros pré-existentes (comportamento padrão da UI)
+        orderBy_Parcelamento: DEFAULT_ORDER_BY,
+        ascDesc_Parcelamento: DEFAULT_ORDER_DIRECTION,
+        empresa_Parcelamento: DEFAULT_EMPRESA_ID, // ID da empresa
+        nossoNumero_Parcelamento: '', // Campo "Nosso Número" (não utilizado na busca por nome)
+        codigoDeBarras_Parcelamento: '', // Campo "Código de Barras" (não utilizado)
+        searchTermSelect_Parcelamento: 'nome_apelido', // Tipo de busca: por nome/apelido
+        searchTerm_Parcelamento: nomeBusca, // Termo da busca (nome do cliente)
+        'situacao_Parcelamento[]': DEFAULT_SITUACAO_PARCELA, // Filtro por situação da parcela (Abertas/Pendentes)
       });
 
-      const response = await this.client.post(SSOTICA_CONSULTA_URL, payload, {
+      console.log('Enviando requisição de busca de parcelas...');
+      const response = await this.client.post(SSOTICA_CONSULTA_URL, searchPayload, {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
+      console.log('Resposta da busca de parcelas recebida.');
 
       const $ = cheerio.load(response.data);
-      const elementos = $(SELECTORS.rows);
-      const dados = elementos.map((i, el) => {
-        const nome = $(el).find(SELECTORS.nome).text().trim() || '';
-        const valor = $(el).find(SELECTORS.valor).text().trim() || '';
-        const parcelaTexto = $(el).find(SELECTORS.parcelaInfo).text().trim();
-        const parcelaMatch = parcelaTexto.match(/Parcela\s(\d+)\sde\s(\d+)/);
-        const numeroParcela = parcelaMatch ? parseInt(parcelaMatch[1], 10) : null;
-        const totalParcelas = parcelaMatch ? parseInt(parcelaMatch[2], 10) : null;
-        const parcelaFormatada = parcelaMatch ? `Parcela ${numeroParcela} de ${totalParcelas}` : '';
-        const vencimento = $(el).find(SELECTORS.vencimentoIconParent).parent().text().trim() || '';
+      const rows = $(SELECTORS.rows);
+      console.log(`Encontradas ${rows.length} linhas de dados brutos na página.`);
 
-        return {
-          nome,
-          valor,
-          parcela: parcelaFormatada,
-          numeroParcela,
-          totalParcelas,
-          vencimento,
-        };
-      }).get();
+      const parcelasExtraidas = [];
+      rows.each((i, el) => {
+        const parcelaData = this._parseParcelaRow($, el);
+        if (parcelaData) {
+          parcelasExtraidas.push(parcelaData);
+        }
+      });
+      console.log(`Extraídas ${parcelasExtraidas.length} parcelas após parsing inicial.`);
 
-      const filtrado = dados.filter(item =>
-        item.nome.toLowerCase().includes(nomeBusca.toLowerCase()) &&
-        item.numeroParcela >= 1 && item.numeroParcela <= 6
+      // Filtragem 1: Pelo nome do cliente (mais preciso, caso a busca do SSÓtica traga resultados parciais)
+      // e pelo intervalo de número de parcelas (1 a 6).
+      const parcelasFiltradas = parcelasExtraidas.filter(item =>
+        item.nome.toLowerCase().includes(nomeBuscaNormalizado) &&
+        item.numeroParcela >= MIN_NUMERO_PARCELA &&
+        item.numeroParcela <= MAX_NUMERO_PARCELA
       );
+      console.log(`Restaram ${parcelasFiltradas.length} parcelas após filtro por nome e número da parcela (1-6).`);
 
-      const dadosUnicos = filtrado.filter((item, index, self) =>
-        index === self.findIndex(t => t.nome === item.nome && t.numeroParcela === item.numeroParcela)
-      );
+      // Filtragem 2: Remover duplicatas (baseado em nome e número da parcela)
+      // Isso pode ocorrer se a mesma parcela aparecer múltiplas vezes na listagem por algum motivo.
+      const parcelasUnicas = [];
+      const  seen = new Set(); // Para rastrear combinações de nome + numeroParcela já vistas
 
-      return dadosUnicos;
+      for (const item of parcelasFiltradas) {
+        const key = `${item.nome}|${item.numeroParcela}`;
+        if (!seen.has(key)) {
+          parcelasUnicas.push(item);
+          seen.add(key);
+        }
+      }
+      console.log(`Restaram ${parcelasUnicas.length} parcelas após remoção de duplicatas.`);
+
+      if (parcelasUnicas.length === 0) {
+        console.log(`Nenhuma parcela encontrada para "${nomeBusca}" que corresponda aos critérios.`);
+      }
+
+      return parcelasUnicas;
 
     } catch (error) {
-      throw new Error(`Erro ao buscar parcelas: ${error.message}`);
+      console.error(`Erro detalhado ao buscar parcelas para "${nomeBusca}":`, error);
+      if (error instanceof SsoticaServiceError) throw error;
+      throw new SsoticaServiceError(`Erro ao buscar parcelas para "${nomeBusca}": ${error.message}`, 'SearchError');
     }
   }
 }
