@@ -69,34 +69,41 @@ class SsoticaScraper {
 
     console.log('Iniciando processo de login no SSÓtica...');
     try {
-      // 1. Obter a página de login para extrair o token CSRF
-      const loginPageResponse = await this.client.get(SSOTICA_LOGIN_URL);
-      const $ = cheerio.load(loginPageResponse.data);
-      this.csrfToken = $(SELECTORS.csrfToken).val();
+      // 1. Acessar a página de login para obter o cookie XSRF-TOKEN
+      console.log('Acessando página de login para obter cookies...');
+      await this.client.get(SSOTICA_LOGIN_URL); // Esta chamada armazena os cookies no jar
 
-      if (!this.csrfToken) {
-        console.error('Token CSRF não encontrado na página de login.');
-        throw new SsoticaServiceError('Token CSRF não encontrado. A estrutura da página de login pode ter mudado.', 'LoginError.CSRFTokenMissing');
+      // 2. Extrair o XSRF-TOKEN do cookieJar
+      // O tough-cookie armazena cookies de forma assíncrona, mas para getCookieStringSync, precisamos da URL.
+      // Para getCookiesSync, também precisamos da URL.
+      const cookies = await this.jar.getCookies(SSOTICA_LOGIN_URL);
+      const xsrfCookie = cookies.find(cookie => cookie.key === 'XSRF-TOKEN');
+
+      if (!xsrfCookie) {
+        console.error('Cookie XSRF-TOKEN não encontrado após acessar a página de login.');
+        throw new SsoticaServiceError('Cookie XSRF-TOKEN não encontrado. O servidor não enviou o cookie esperado.', 'LoginError.XSRFTokenMissing');
       }
-      console.log('Token CSRF obtido com sucesso.');
+      this.csrfToken = decodeURIComponent(xsrfCookie.value); // O valor do cookie pode estar URL encoded
+      console.log('XSRF-TOKEN (do cookie) obtido com sucesso.');
 
-      // 2. Preparar dados do formulário de login
-      // Ajustado para usar 'email' como chave, baseado no erro 422 e confirmação do usuário
+      // 3. Preparar dados do formulário de login
       const loginFormParams = new URLSearchParams({
-        _token: this.csrfToken,
-        email: this.user, // this.user contém o e-mail fornecido no .env
+        _token: this.csrfToken, // Usar o token do cookie aqui
+        email: this.user,
         password: this.pass,
       });
       
-      // Log para confirmar a alteração (pode ser removido após sucesso)
-      console.log('Enviando formulário de login com os seguintes dados (campo "email"):', Object.fromEntries(loginFormParams));
+      console.log('Enviando formulário de login com os seguintes dados:', Object.fromEntries(loginFormParams));
 
-      // 3. Enviar a requisição de login (POST)
+      // 4. Enviar a requisição de login (POST) com o cabeçalho X-XSRF-TOKEN
       const loginPostResponse = await this.client.post(SSOTICA_LOGIN_URL, loginFormParams, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-XSRF-TOKEN': this.csrfToken, // Adicionar o token CSRF como cabeçalho
+        },
       });
 
-      // Validação simples do sucesso do login (pode ser melhorada)
+      // Validação do sucesso do login
       // Ex: verificar se foi redirecionado para o dashboard ou se o corpo da resposta indica sucesso.
       // Por enquanto, consideramos sucesso se não houver erro e o status for 2xx.
       // E crucialmente, se a URL final não for a de login (indicando redirecionamento por falha)
