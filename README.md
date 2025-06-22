@@ -2,9 +2,9 @@
 
 ## Visão Geral
 
-Esta API fornece um endpoint para consultar parcelas financeiras em aberto de clientes no sistema SSÓtica. Ela utiliza web scraping para realizar o login no sistema, buscar as informações e retorná-las em formato JSON.
+Esta API fornece um endpoint para consultar parcelas financeiras de clientes no sistema SSÓtica, permitindo filtrar por diferentes situações de parcela. Ela utiliza web scraping para realizar o login no sistema, buscar as informações (em todos os períodos de data) e retorná-las em formato JSON.
 
-O foco principal é permitir a integração dessa consulta com outros sistemas, automatizando a verificação de pendências financeiras de clientes específicos, filtrando pelas primeiras 6 parcelas.
+O foco principal é permitir a integração dessa consulta com outros sistemas, automatizando a verificação da situação financeira de clientes específicos (filtrando pelas primeiras 6 parcelas encontradas que correspondam aos critérios).
 
 ## Configuração
 
@@ -45,11 +45,15 @@ Substitua `seu_usuario_ssotica` e `sua_senha_ssotica` pelas suas credenciais rea
 
 ### `GET /consultar-parcelas`
 
-Este endpoint consulta as parcelas em aberto de um cliente no sistema SSÓtica.
+Este endpoint consulta as parcelas de um cliente no sistema SSÓtica, com flexibilidade para filtrar por situação. A busca de período é sempre realizada em todas as datas.
 
 **Parâmetros de Query:**
 
 *   `nome` (string, obrigatório): O nome (ou parte do nome) do cliente a ser consultado. A busca não é case-sensitive.
+*   `situacoes` (string, opcional): Uma string com códigos de situação da parcela separados por vírgula (ex: `AP,PG,AT`).
+    *   Códigos válidos: `AP` (Em aberto), `PG` (Pago), `AT` (Em atraso), `CA` (Cancelado), `RE` (Renegociado).
+    *   Se omitido, o padrão é buscar apenas `AP` (Em aberto).
+    *   Para buscar todas as situações, envie o parâmetro `situacoes` com um valor vazio (ex: `situacoes=`) ou com o valor especial `TODAS` (ex: `situacoes=TODAS`). A implementação no servidor deve traduzir isso para um array vazio ao chamar o serviço de busca.
 
 **Exemplo de Requisição:**
 
@@ -59,9 +63,23 @@ Usando `curl`:
 curl "http://localhost:3000/consultar-parcelas?nome=Nome%20Do%20Cliente"
 ```
 
+Para buscar situações específicas (Em Aberto e Pago):
+```bash
+curl "http://localhost:3000/consultar-parcelas?nome=Nome%20Do%20Cliente&situacoes=AP,PG"
+```
+
+Para buscar todas as situações:
+```bash
+curl "http://localhost:3000/consultar-parcelas?nome=Nome%20Do%20Cliente&situacoes="
+```
+ou
+```bash
+curl "http://localhost:3000/consultar-parcelas?nome=Nome%20Do%20Cliente&situacoes=TODAS"
+```
+
 Ou acessando diretamente no navegador:
 
-`http://localhost:3000/consultar-parcelas?nome=Nome Do Cliente`
+`http://localhost:3000/consultar-parcelas?nome=Nome Do Cliente&situacoes=AP,PG`
 
 **Exemplo de Resposta de Sucesso (200 OK):**
 
@@ -150,19 +168,25 @@ Se o cliente for encontrado mas não tiver parcelas que correspondam aos critér
     Automatizar a consulta da situação financeira de um cliente diretamente de um sistema de gestão, exibindo pendências (primeiras 6 parcelas) antes de uma nova venda ou atendimento.
 
 2.  **Notificações Automatizadas:**
-    Utilizar a API como parte de um sistema maior para identificar clientes com parcelas próximas ao vencimento (dentro das 6 primeiras) e disparar lembretes.
+    Utilizar a API como parte de um sistema maior para identificar clientes com parcelas próximas ao vencimento (dentro das 6 primeiras, filtrando por situação 'AP' e 'AT') e disparar lembretes.
 
-3.  **Dashboard Financeiro Simplificado:**
-    Alimentar um painel de controle que exibe rapidamente clientes com pendências financeiras iniciais, facilitando a ação da equipe de cobrança.
+3.  **Dashboard Financeiro Abrangente:**
+    Alimentar um painel de controle que exibe clientes com pendências ('AP', 'AT'), parcelas pagas recentemente ('PG'), ou renegociadas ('RE'), facilitando diferentes ações da equipe financeira.
 
-4.  **Validação Rápida de Crédito (Simplificada):**
-    Em cenários onde uma análise de crédito completa não é necessária, a API pode fornecer um indicativo rápido se o cliente possui parcelas iniciais em aberto.
+4.  **Análise de Histórico de Pagamento (Simplificada):**
+    Consultar parcelas pagas ('PG') para entender o comportamento recente de pagamento de um cliente.
+
+5.  **Validação Rápida de Crédito (Aprimorada):**
+    Verificar se o cliente possui parcelas em aberto ('AP') ou em atraso ('AT') para uma análise de crédito simplificada.
 
 ## Detalhes da Implementação
 
 *   **Web Scraping:** A API utiliza as bibliotecas `axios` e `cheerio` para interagir com o site do SSÓtica como se fosse um navegador. Ela primeiro realiza o login para obter um cookie de sessão e um token CSRF, e depois submete um formulário de busca para listar as parcelas.
 *   **Gerenciamento de Sessão:** `axios-cookiejar-support` e `tough-cookie` são usados para manter a sessão de login ativa entre as requisições.
-*   **Filtragem Específica:** Após obter a lista de todas as parcelas em aberto do cliente, a API filtra para retornar apenas as parcelas de número 1 a 6.
+*   **Filtragem:**
+    *   **Período:** A busca sempre considera todos os períodos de data (o filtro `tipoPeriodo_Parcelamento` é enviado como vazio).
+    *   **Situação:** Permite filtrar por uma ou mais situações de parcela (`AP`, `PG`, `AT`, `CA`, `RE`) ou buscar todas as situações. O padrão é `AP` (Em aberto).
+    *   **Quantidade:** Após obter a lista de parcelas do cliente que correspondem aos filtros de situação e período, a API filtra para retornar apenas as parcelas de número 1 a 6.
 *   **Variáveis de Ambiente:** As credenciais e a porta são gerenciadas via arquivo `.env` para segurança e flexibilidade.
 
 **Importante:** Como esta API depende da estrutura HTML do site SSÓtica, quaisquer alterações significativas no layout ou nos seletores CSS do site podem quebrar a funcionalidade de scraping. Manutenção e atualizações podem ser necessárias caso o site alvo seja modificado.Tool output for `create_file_with_block`:
